@@ -1,0 +1,323 @@
+<!-- <script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Highlight Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.9/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.6.8/axios.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const App = () => {
+            const [videoFile, setVideoFile] = useState(null);
+            const [status, setStatus] = useState('');
+            const [highlights, setHighlights] = useState([]);
+            const [finalVideo, setFinalVideo] = useState('');
+            const [isProcessing, setIsProcessing] = useState(false);
+
+            const handleFileChange = (e) => {
+                setVideoFile(e.target.files[0]);
+                setStatus('');
+                setHighlights([]);
+                setFinalVideo('');
+            };
+
+            const uploadVideo = async () => {
+                if (!videoFile) {
+                    setStatus('Please select a video file.');
+                    return;
+                }
+                setIsProcessing(true);
+                setStatus('Uploading video...');
+                const formData = new FormData();
+                formData.append('video', videoFile);
+
+                try {
+                    const response = await axios.post('http://localhost:5000/upload', formData, {
+                        headers: { 'Content-Type': 'multipart/form-data' },
+                    });
+                    setStatus('Video uploaded successfully. Processing highlights...');
+                    generateHighlights();
+                } catch (error) {
+                    setStatus('Error uploading video: ' + error.message);
+                    setIsProcessing(false);
+                }
+            };
+
+            const generateHighlights = async () => {
+                try {
+                    const response = await axios.post('http://localhost:5000/generate-highlights');
+                    setHighlights(response.data.highlights);
+                    setStatus('Highlights generated. Concatenating final video...');
+                    concatenateClips();
+                } catch (error) {
+                    setStatus('Error generating highlights: ' + error.message);
+                    setIsProcessing(false);
+                }
+            };
+
+            const concatenateClips = async () => {
+                try {
+                    const response = await axios.post('http://localhost:5000/concatenate');
+                    setFinalVideo(response.data.finalVideo);
+                    setStatus('Final video created successfully!');
+                } catch (error) {
+                    setStatus('Error concatenating clips: ' + error.message);
+                } finally {
+                    setIsProcessing(false);
+                }
+            };
+
+            return (
+                <div className="container mx-auto p-4">
+                    <h1 className="text-3xl font-bold mb-4 text-center">Video Highlight Generator</h1>
+                    <div className="bg-white p-6 rounded-lg shadow-md">
+                        <div className="mb-4">
+                            <label className="block text-gray-700 mb-2">Upload Video</label>
+                            <input
+                                type="file"
+                                accept="video/mp4"
+                                onChange={handleFileChange}
+                                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                            />
+                        </div>
+                        <button
+                            onClick={uploadVideo}
+                            disabled={isProcessing}
+                            className={`w-full py-2 px-4 rounded text-white ${isProcessing ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'}`}
+                        >
+                            {isProcessing ? 'Processing...' : 'Generate Highlights'}
+                        </button>
+                        {status && (
+                            <p className={`mt-4 text-center ${status.includes('Error') ? 'text-red-600' : 'text-green-600'}`}>
+                                {status}
+                            </p>
+                        )}
+                    </div>
+                    {highlights.length > 0 && (
+                        <div className="mt-8">
+                            <h2 className="text-2xl font-semibold mb-4">Highlight Clips</h2>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {highlights.map((highlight, index) => (
+                                    <div key={index} className="bg-white p-4 rounded-lg shadow">
+                                        <video controls className="w-full rounded">
+                                            <source src={`http://localhost:5000${highlight}`} type="video/mp4" />
+                                        </video>
+                                        <p className="mt-2 text-sm text-gray-600">Highlight {index + 1}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {finalVideo && (
+                        <div className="mt-8">
+                            <center><h1 className="text-2xl font-semibold mb-4">Final Highlight Video</h1></center>
+                            <video controls className="w-full max-w-4xl mx-auto rounded">
+                                <source src={`http://localhost:5000${finalVideo}`} type="video/mp4" />
+                            </video>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html> -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Highlight Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.9/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.6.8/axios.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const App = () => {
+            const [videoFile, setVideoFile] = useState(null);
+            const [status, setStatus] = useState('');
+            const [highlights, setHighlights] = useState([]);
+            const [finalVideo, setFinalVideo] = useState('');
+            const [isProcessing, setIsProcessing] = useState(false);
+
+            const handleFileChange = (e) => {
+                setVideoFile(e.target.files[0]);
+                setStatus('');
+                setHighlights([]);
+                setFinalVideo('');
+            };
+
+            const uploadVideo = async () => {
+                if (!videoFile) {
+                    setStatus('Please select a video file.');
+                    return;
+                }
+                setIsProcessing(true);
+                setStatus('Uploading video...');
+                const formData = new FormData();
+                formData.append('video', videoFile);
+
+                try {
+                    const response = await axios.post('http://localhost:5000/upload', formData, {
+                        headers: { 'Content-Type': 'multipart/form-data' },
+                    });
+                    setStatus('Video uploaded successfully. Processing highlights...');
+                    generateHighlights();
+                } catch (error) {
+                    setStatus('Error uploading video: ' + error.message);
+                    setIsProcessing(false);
+                }
+            };
+
+            const generateHighlights = async () => {
+                try {
+                    const response = await axios.post('http://localhost:5000/generate-highlights');
+                    setHighlights(response.data.highlights);
+                    setStatus('Highlights generated. Concatenating final video...');
+                    concatenateClips();
+                } catch (error) {
+                    setStatus('Error generating highlights: ' + error.message);
+                    setIsProcessing(false);
+                }
+            };
+
+            const concatenateClips = async () => {
+                try {
+                    const response = await axios.post('http://localhost:5000/concatenate');
+                    setFinalVideo(response.data.finalVideo);
+                    setStatus('Final video created successfully!');
+                } catch (error) {
+                    setStatus('Error concatenating clips: ' + error.message);
+                } finally {
+                    setIsProcessing(false);
+                }
+            };
+
+            const downloadFinalVideo = () => {
+                if (finalVideo) {
+                    const link = document.createElement('a');
+                    link.href = `http://localhost:5000${finalVideo}`;
+                    link.download = 'final_highlights.mp4';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+            };
+
+            return (
+                <div className="container mx-auto p-4">
+                    <h1 className="text-3xl font-bold mb-4 text-center">Video Highlight Generator</h1>
+                    <div className="bg-white p-6 rounded-lg shadow-md">
+                        <div className="mb-4">
+                            <label className="block text-gray-700 mb-2">Upload Video</label>
+                            <input
+                                type="file"
+                                accept="video/mp4"
+                                onChange={handleFileChange}
+                                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                            />
+                        </div>
+                        <button
+                            onClick={uploadVideo}
+                            disabled={isProcessing}
+                            className={`w-full py-2 px-4 rounded text-white ${isProcessing ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'}`}
+                        >
+                            {isProcessing ? 'Processing...' : 'Generate Highlights'}
+                        </button>
+                        {status && (
+                            <p className={`mt-4 text-center ${status.includes('Error') ? 'text-red-600' : 'text-green-600'}`}>
+                                {status}
+                            </p>
+                        )}
+                    </div>
+                    {highlights.length > 0 && (
+                        <div className="mt-8">
+                            <h2 className="text-2xl font-semibold mb-4">Highlight Clips</h2>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {highlights.map((highlight, index) => (
+                                    <div key={index} className="bg-white p-4 rounded-lg shadow">
+                                        <video controls className="w-full rounded">
+                                            <source src={`http://localhost:5000${highlight}`} type="video/mp4" />
+                                        </video>
+                                        <p className="mt-2 text-sm text-gray-600">Highlight {index + 1}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {finalVideo && (
+                        <div className="mt-8">
+                            
+                            <center><h1 className="text-4xl font-bold mb-4 text-blue-600 margin-top-30px">Final Highlight Video</h1></center>
+                            <video controls className="w-full max-w-4xl mx-auto rounded">
+                                <source src={`http://localhost:5000${finalVideo}`} type="video/mp4" />
+                            </video>
+                            
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
